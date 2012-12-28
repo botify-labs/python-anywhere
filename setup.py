@@ -1,5 +1,18 @@
-from distutils.core import setup
+from distutils.core import setup, Command
 
+
+class TestCommand(Command):
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def run(self):
+        import subprocess
+        subprocess.call('nosetests --with-doctest anywhere', shell=True)
+
+    def finalize_options(self):
+        pass
 
 setup(
     name='anywhere',
@@ -14,4 +27,5 @@ setup(
     description='Handle files located anywhere through multiple protocols '
                 '(filesystem, ssh, s3)',
     long_description=open('README.md').read(),
+    cmdclass={'test': TestCommand}
 )
