@@ -3,6 +3,8 @@
 Anywhere provides a set of modules to work with resources that are
 identified by a URL. It comes with a set of handlers that can be extended.
 
+It is licensed under a BSD 2-Clause license (see LICENSE.txt).
+
 ## The Resource type
 
 The Resource type abstracts access to a resource identified by a URL that contains:
