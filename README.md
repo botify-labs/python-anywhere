@@ -18,43 +18,121 @@ The Resource type abstracts access to a resource identified by a URL that contai
 
 Every Resource implements the interface:
 
-- type: file | dir
 - path: full path without the protocol
 - str returns the URL
 - name
 - size
+- atime
 - mtime
-- get(path=None)
-- put(url)
+- ctime
+- get()
+- put()
 - delete()
 - read()
 
+## Examples
 
-## Example
+These examples come from the filesystem interface in `anywhere.resource.handler.filesystem`.
+
+### Handling a file
+
+Let's start by importing some modules to compare the resource interface with
+the Python standard library:
 
 ```python
->>> local = remote.get()
->>> local
-<FilesystemResource 'file:///path/to/file.json' type='file'>
->>> local.type
-'file'
->>> local.basename
-'file.json'
->>> local.path
-'/storage1/path/to/file.json'
->>> str(local)
-'ssh://storage1/path/to/file.json'
->>> local.codec
-<JSONCodec>
->>> local_yaml = local.encode(path='/path/to/file.yaml')
->>> local_yaml
-<FilesystemResource 'file:///path/to/file.yaml'>
->>> local_yaml.delete()
->>> url = 's3:///path/to/bucket'
->>> local.put('s3:///path/to/bucket')
->>> remote_s3 = Resource(s3_url)
+>>> import tempfile
+>>> import os.path
+>>> import shutil
+```
 
->>> remote_dir = Resource('ssh://storage1/path/to')
->>> remote_dir
-<SSHResource 'ssh://storage1/path/to' type='dir'>
+Now we create a temporary file and wrap it in a `FileResource`:
+
+```python
+>>> tmp = tempfile.NamedTemporaryFile()
+>>> file = Resource(tmp.name)
+>>> file # doctest: +ELLIPSIS
+<FileResource file:///tmp/tmp...>
+>>> str(file) # doctest: +ELLIPSIS
+'file:///tmp/tmp...'
+>>> file.path == tmp.name
+True
+>>> file.name == os.path.basename(tmp.name)
+True
+>>> file.size
+0
+```
+
+The file is currently empty. We can append a line to it to add some content:
+
+```python
+>>> file.append('First line.')
+>>> file.read()
+'First line.'
+```
+
+We can also add several lines at the same time:
+
+```python
+>>> file.extend(['Second line.', 'Third line.'])
+>>> file.read()
+'Second line.\\nThird line.'
+```
+
+### Handling a directory
+
+We continue by creating a temporary directory:
+
+```python
+>>> tmpdir = tempfile.mkdtemp()
+>>> dir = Resource(tmpdir)
+```
+
+The file is not inside:
+
+```python
+>>> file in dir
+False
+```
+
+Let's copy it into the directory:
+
+```
+>>> dir.add(file)
+>>> file in dir
+True
+>>> list(dir) == [file.name]
+True
+>>> file_alias = dir[file.name]
+>>> file_alias.read() == file.read()
+True
+```
+
+By default `meth:FileResource.add` overwrites the file if it already exists in
+the directory:
+
+```python
+    >>> dir.add(file)
+```
+
+Setting the parameter *overwrite* to `False` allows to prevent from overwriting
+the file:
+
+```python
+>>> dir.add(file, overwrite=False) #doctest: +ELLIPSIS
+Traceback (most recent call last):
+...
+IOError: '...' already exists in '/tmp/...'
+
+>>> dir.remove(file)
+>>> list(dir)
+[]
+```
+
+Beware the a file alias may reference a file that was removed:
+
+```python
+>>> file_alias.read() #doctest: +ELLIPSIS
+Traceback (most recent call last):
+...
+IOError: [Errno 2] No such file or directory: '/tmp/...'
 ```
