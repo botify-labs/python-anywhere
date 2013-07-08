@@ -25,10 +25,27 @@ Every Resource implements the interface:
 - atime
 - mtime
 - ctime
-- get()
-- put()
+- get(path)
+- put(path)
+- create()
 - delete()
-- read()
+- read(size)
+- flush()
+- copy(Resource)
+- empty()
+
+FileResources also implements
+
+- write()
+- __iter__() – iterate over the resources lines
+- reset() – abort not flushed writes
+
+DirectoryResources implement
+
+- list() – list childs names
+- __iter__() – iterate over child resources
+- add(Resource) – add an new child
+
 
 ## Examples
 
