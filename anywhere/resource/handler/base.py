@@ -38,8 +38,11 @@ class UnknownScheme(Exception):
 
 
 def Resource(url):
+    if not "://" in url:
+        # must be a local file
+        url = 'file://{}'.format(os.path.abspath(url))
     result = urlparse(url)
-    scheme = result.scheme or 'file'
+    scheme = result.scheme
     if not scheme in scheme_to_resource:
         raise UnknownScheme(url=url)
     return scheme_to_resource[scheme](path=result.path,
