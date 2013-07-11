@@ -17,8 +17,8 @@ DIR1_NAME = 'dir1'
 DIR1_URL = 'swift://{}/{}/{}/'.format(SWIFT_LOCATION,
                                       SWIFT_CONTAINER,
                                       DIR1_NAME)
-FILE1_URL = '{}/file1'.format(DIR1_URL)
-FILE2_URL = '{}/file2'.format(DIR1_URL)
+FILE1_URL = '{}file1'.format(DIR1_URL)
+FILE2_URL = '{}file2'.format(DIR1_URL)
 PUTFILE_CONTENT = "put file content"
 SWIFT_ENV = {
     'OS_USERNAME': os.environ['ANYWHERE_TEST_USERNAME'],
@@ -70,6 +70,9 @@ class TestSwiftDirectory(TestCase):
         init_swift_backend()
         self.dir1 = Resource(DIR1_URL)
 
+    def test_url(self):
+        self.assertEqual(self.dir1.url, DIR1_URL)
+
     def test_init(self):
         # existing directory
         self.assertTrue(self.dir1.exists)
@@ -79,9 +82,13 @@ class TestSwiftDirectory(TestCase):
         #self.assertFalse(dir2.exists)
 
 
-#class TestSwiftFile(TestCase):
-    #def setUp(self):
-       #self.file1 = Resource(FILE1_URL)
+class TestSwiftFile(TestCase):
+    def setUp(self):
+        init_swift_backend()
+        self.file1 = Resource(FILE1_URL)
+
+    def test_url(self):
+        self.assertEqual(self.file1.url, FILE1_URL)
 
     #def test_init(self):
         #"""test Resource init"""

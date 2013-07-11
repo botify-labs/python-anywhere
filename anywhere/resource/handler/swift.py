@@ -57,7 +57,7 @@ class SwiftLocation(object):
         }
         self._dirs = {}
 
-    def iter_container(self, container):
+    def iter_container(self, container=''):
         ''' iterate the names of objects in a container, or all containers
         names if no container is provided'''
         cmd = [SWIFT_CMD, 'list', container]
@@ -198,7 +198,7 @@ class SwiftResource(object):
 
     @property
     def url(self):
-        return "{}://{}/{}".format(self.type,
+        return "{}://{}{}".format(self.type,
                                    self._location,
                                    self._path)
 
