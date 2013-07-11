@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from unittest import TestCase
+from unittest import TestCase, skip
 from anywhere.resource.handler import Resource
 
 from anywhere.resource.handler.memory import __db__
@@ -90,11 +90,13 @@ class TestMemoryFile(TestCase):
             self.assertEqual(fd.read(), FILE1_CONTENT)
         os.remove(path)
 
+    @skip
     def test_put(self):
         path = tempfile.mktemp()
         with open(path, 'w') as fd:
-            fd.write()
-            self.assertEqual(fd.read(), FILE1_CONTENT)
+            fd.write(PUTFILE_CONTENT)
+        self.file1.put(path)
+        self.assertEqual(self.file1, PUTFILE_CONTENT)
 
 
 class TestMemoryDirectory(TestCase):
