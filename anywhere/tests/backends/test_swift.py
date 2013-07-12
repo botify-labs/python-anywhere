@@ -5,6 +5,7 @@ import subprocess
 from unittest import TestCase
 from anywhere.resource.handler import Resource
 from anywhere.resource.handler.swift import register_location, location_registry
+from anywhere.resource.handler.swift import SwiftDirectoryResource, SwiftFileResource
 
 
 FILE1_LINE1 = 'file 1 line 1 content\n'
@@ -14,9 +15,9 @@ FILE1_CONTENT = FILE1_LINE1 + FILE1_LINE2
 SWIFT_LOCATION = 'testloc'
 SWIFT_CONTAINER = 'anywhere_test'
 DIR1_NAME = 'dir1'
-DIR1_URL = 'swift://{}/{}/{}/'.format(SWIFT_LOCATION,
-                                      SWIFT_CONTAINER,
-                                      DIR1_NAME)
+CONTAINER_URL = 'swift://{}/{}'.format(SWIFT_LOCATION,
+                                        SWIFT_CONTAINER)
+DIR1_URL = '{}/{}/'.format(CONTAINER_URL, DIR1_NAME)
 FILE1_URL = '{}file1'.format(DIR1_URL)
 FILE2_URL = '{}file2'.format(DIR1_URL)
 PUTFILE_CONTENT = "put file content"
@@ -69,6 +70,7 @@ class TestSwiftDirectory(TestCase):
     def setUp(self):
         init_swift_backend()
         self.dir1 = Resource(DIR1_URL)
+        self.container = Resource(CONTAINER_URL)
 
     def test_url(self):
         self.assertEqual(self.dir1.url, DIR1_URL)
@@ -77,9 +79,15 @@ class TestSwiftDirectory(TestCase):
         # existing directory
         self.assertTrue(self.dir1.exists)
         self.assertEqual(self.dir1.list(), ['file1'])
-        # non existing directory
-        #dir2 = Resource('mem://testloc/plop/')
-        #self.assertFalse(dir2.exists)
+        self.assertIsInstance(self.container, SwiftDirectoryResource)
+
+    def test_exists(self):
+        self.assertTrue(self.dir1.exists)
+        self.assertTrue(self.container.exists)
+        self.assertFalse(Resource(CONTAINER_URL+'/notadir/').exists)
+        self.assertFalse(Resource(DIR1_URL + 'notatfile').exists)
+        cont_url = 'swift://{}/{}'.format(SWIFT_LOCATION,'notacontainer')
+        self.assertFalse(Resource(cont_url).exists)
 
 
 class TestSwiftFile(TestCase):

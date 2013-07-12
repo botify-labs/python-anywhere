@@ -103,7 +103,8 @@ class SwiftLocation(object):
         return True
 
     def exists(self, container, path):
-        path = path.lstrip('/')
+        if path is not None:
+            path = path.lstrip('/')
         try:
             result = path in self.iter_container(container)
         except SwiftError as e:
@@ -156,7 +157,7 @@ def Resource(path, location='', scheme='swift'):
     if location not in location_registry:
         raise ValueError('swift location `{}` is not registered yet')
     location = location_registry[location]
-    if path.endswith('/'):
+    if path.endswith('/') or not '/' in path.strip('/'):
         return SwiftDirectoryResource(path, location)
     return SwiftFileResource(path, location)
 
@@ -183,7 +184,7 @@ class SwiftResource(object):
         if not self._stat_:
             stat = self._location.get_stat(self._container, self._local_path)
             self._stat_ = {}
-            for line in stat.splitlines:
+            for line in stat.splitlines():
                 key, value = line.split(':',1)
                 self._stat_[key.strip()] = value.strip()
         return self._stat_
@@ -284,7 +285,11 @@ class SwiftDirectoryResource(SwiftResource, AbstractDirectoryResource):
     def flush(self):
         'does nothing'
 
+    @property
     def exists(self):
+        if self._local_path is None:
+            # just check that the container exists
+            return super(SwiftDirectoryResource, self).exists
         try:
             for entry in self._location.iter_container(self._container):
                 if entry.startswith(self._local_path + '/'):
@@ -295,7 +300,6 @@ class SwiftDirectoryResource(SwiftResource, AbstractDirectoryResource):
             else:
                 raise
         return False
-
 
     def list(self, recursive=False):
         if not self.exists:
