@@ -73,12 +73,33 @@ class SwiftLocation(object):
                     break
             yield out.strip()
 
+    def iter_file(self, container, path, cwd=None):
+        print container, path
+        return iter(self.stream_cmd([SWIFT_CMD , 'download', container,
+                                     path, '-o', '-']))
+
     @property
     def env(self):
         if not hasattr(self, '_env'):
             self._env = os.environ.copy()
             self._env.update(self.swift_env)
         return self._env
+
+    def stream_cmd(self, cmd, cwd=None):
+        if isinstance(cmd, basestring):
+            cmd = cmd.split()
+        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, cwd=cwd,
+                                stdout=subprocess.PIPE, env=self.env)
+        while True:
+            out = proc.stdout.readline()
+            if out == '':
+                return_code = proc.poll()
+                if return_code:
+                    raise SwiftError(proc.stderr.read(), return_code)
+                if return_code == 0:
+                    break
+            yield out
+
 
     def simple_cmd(self, cmd, cwd=None):
         'helper to execute a swift command in given cwd'
@@ -271,7 +292,7 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
         raise NotImplementedError()
 
     def __iter__(self):
-        return iter(self._read_stream)
+        return self._location.iter_file(self._container, self._local_path)
 
 
 class SwiftDirectoryResource(SwiftResource, AbstractDirectoryResource):

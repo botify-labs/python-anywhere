@@ -76,7 +76,6 @@ class TestSwiftDirectory(TestCase):
         self.assertEqual(self.dir1.url, DIR1_URL)
 
     def test_init(self):
-        # existing directory
         self.assertTrue(self.dir1.exists)
         self.assertEqual(self.dir1.list(), ['file1'])
         self.assertIsInstance(self.container, SwiftDirectoryResource)
@@ -97,6 +96,10 @@ class TestSwiftFile(TestCase):
 
     def test_url(self):
         self.assertEqual(self.file1.url, FILE1_URL)
+
+    def test_iter(self):
+        file_list = [line for line in self.file1]
+        self.assertEqual(file_list, [FILE1_LINE1, FILE1_LINE2])
 
     #def test_init(self):
         #"""test Resource init"""
@@ -126,10 +129,6 @@ class TestSwiftFile(TestCase):
         #self.file1.delete()
         #self.assertFalse(self.file1.exists)
         #self.assertNotIn('file1', __db__.schemes['mem']['testloc']['root'])
-
-    #def test_iter(self):
-        #file_list = [line for line in self.file1]
-        #self.assertEqual(file_list, [FILE1_LINE1, FILE1_LINE2])
 
     #def test_write(self):
         #NEW_CONTENT = "42"
