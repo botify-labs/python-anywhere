@@ -21,7 +21,10 @@ setup(
     author_email='greg@0x80.net',
     packages=['anywhere',
               'anywhere.resource',
-              'anywhere.resource.handler'],
+              'anywhere.resource.handler',
+              'anywhere.compression',
+              'anywhere.utils'
+             ],
     url='http://pypi.python.org/pypi/anywhere/',
     license='LICENSE.txt',
     description='Handle files located anywhere through multiple protocols '

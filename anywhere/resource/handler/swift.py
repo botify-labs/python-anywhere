@@ -3,13 +3,17 @@ Handles swift objects.
 """
 from __future__ import absolute_import
 
+import sys
 import os
+from os import environ
 import subprocess
 import tempfile
 import datetime
+from cStringIO import StringIO
 
 try:
     from swiftclient import client as swift
+    from swiftclient import Connection, ClientException, HTTPException, utils
 except:
     # let the module import run. It will raise only if the
     # user tries to use 'swift://' urls
@@ -19,20 +23,11 @@ from .base import AbstractFileResource, AbstractDirectoryResource
 from .base import scheme_to_resource
 from .base import UnknownScheme
 from .exceptions import URLError
+from anywhere.compression.utils import guess_compression_module
+from anywhere.utils.io import OHelper
 
 
 SWIFT_CMD = 'swift'
-
-
-class LocationRegistry(dict):
-    def register(self, key, value):
-        self[key] = value
-
-location_registry = LocationRegistry()
-
-def register_location(name, user_name, tenant_name, auth_url, password):
-    location_registry[name] = SwiftLocation(name, user_name, tenant_name, auth_url,
-                                            password)
 
 
 class SwiftError(Exception):
@@ -40,6 +35,115 @@ class SwiftError(Exception):
     def __init__(self, message, errno):
         super(SwiftError, self).__init__(message)
         self.errno = errno
+
+
+### swift lib helpers
+def get_conn_params(auth_url=environ.get('OS_AUTH_URL'),
+                    user_name=environ.get('OS_USER_NAME'),
+                    password=environ.get('OS_PASSWORD'),
+                    tenant_id=environ.get('OS_TENANT_ID'),
+                    tenant_name=environ.get('OS_TENANT_NAME'),
+                    service_type=environ.get('OS_SERVICE_TYPE'),
+                    endpoint_type=environ.get('OS_ENDPOINT_TYPE'),
+                    auth_token=environ.get('OS_AUTH_TOKEN'),
+                    object_storage_url=environ.get('OS_STORAGE_URL'),
+                    region_name=environ.get('OS_REGION_NAME'),
+                    snet=False,
+                    os_cacert=environ.get('OS_CACERT'),
+                    insecure=utils.config_true_value(
+                        environ.get('SWIFTCLIENT_INSECURE')),
+                    ssl_compression=True
+                   ):
+    "create a ConnectionParam given new style params"
+
+    os_options = {
+        'tenant_id': tenant_id,
+        'tenant_name': tenant_name,
+        'service_type': service_type,
+        'endpoint_type': endpoint_type,
+        'auth_token': auth_token,
+        'object_storage_url': object_storage_url,
+        'region_name': region_name}
+
+    return ConnectionParams(auth_url, user_name, password, '2.0', os_options,
+                            snet, os_cacert, insecure, ssl_compression)
+
+
+class ConnectionParams(object):
+    """
+    Connection parameters including old-style params.
+    """
+    def __init__(self, auth, user, key, auth_version, os_options,
+                 snet=False,
+                 os_cacert=environ.get('OS_CACERT'),
+                 insecure=utils.config_true_value(
+                     environ.get('SWIFTCLIENT_INSECURE')),
+                 ssl_compression=True
+                ):
+        self.auth = auth
+        self.user = user
+        self.key = key
+        self.auth_version = auth_version
+        self.os_options = os_options
+        self.snet = snet
+        self.os_cacert = os_cacert
+        self.insecure = insecure
+        self.ssl_compression = ssl_compression
+
+
+def get_conn(options):
+    """
+    Return a connection building it from the options.
+    """
+    return Connection(options.auth,
+                      options.user,
+                      options.key,
+                      auth_version=options.auth_version,
+                      os_options=options.os_options,
+                      snet=options.snet,
+                      cacert=options.os_cacert,
+                      insecure=options.insecure)
+                      #ssl_compression=options.ssl_compression)
+
+
+### register location stuff
+class LocationRegistry(dict):
+    def register(self, key, value):
+        self[key] = value
+
+
+location_registry = LocationRegistry()
+
+
+def register_location(name, user_name, tenant_name, auth_url, password):
+    location_registry[name] = SwiftLocation(name, user_name, tenant_name, auth_url,
+                                            password)
+
+
+
+class SwiftFileBody(OHelper):
+    def __init__(self, body):
+        self.body = body
+        self.buf = StringIO()
+
+    def read(self, size=-1):
+        if size == -1:
+            size=sys.maxint
+        while self.buf.tell() < size:
+            try:
+                next_chunk = self.body.next()
+            except StopIteration:
+                break
+            self.buf.write(next_chunk)
+        return self.flush_stream(pos=size)
+
+    def flush_stream(self, pos):
+        data = self.buf.getvalue()
+        pos = pos < len(data) and pos or len(data)
+        self.buf.seek(0)
+        self.buf.truncate()
+        self.buf.write(data[pos:])
+        return data[:pos]
 
 
 class SwiftLocation(object):
@@ -55,7 +159,16 @@ class SwiftLocation(object):
             'OS_AUTH_URL': auth_url,
             'OS_PASSWORD': password
         }
+        self.conn_params = get_conn_params(auth_url=auth_url, user_name=user_name,
+                                           tenant_name=tenant_name, password=password)
         self._dirs = {}
+        self._conn = None
+
+    @property
+    def conn(self):
+        if self._conn is None:
+            self._conn = get_conn(self.conn_params)
+        return self._conn
 
     def iter_container(self, container=''):
         ''' iterate the names of objects in a container, or all containers
@@ -73,10 +186,11 @@ class SwiftLocation(object):
                     break
             yield out.strip()
 
-    def iter_file(self, container, path, cwd=None):
-        print container, path
-        return iter(self.stream_cmd([SWIFT_CMD , 'download', container,
-                                     path, '-o', '-']))
+    def open_file(self, container, path):
+        headers, body = \
+            self.conn.get_object(container, path, resp_chunk_size=65536)
+        ## XXX: check headers for errors
+        return SwiftFileBody(body)
 
     @property
     def env(self):
@@ -85,21 +199,11 @@ class SwiftLocation(object):
             self._env.update(self.swift_env)
         return self._env
 
-    def stream_cmd(self, cmd, cwd=None):
+    def call_cmd(self, cmd, cwd=None):
         if isinstance(cmd, basestring):
             cmd = cmd.split()
-        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, cwd=cwd,
+        return subprocess.Popen(cmd, stderr=subprocess.PIPE, cwd=cwd,
                                 stdout=subprocess.PIPE, env=self.env)
-        while True:
-            out = proc.stdout.readline()
-            if out == '':
-                return_code = proc.poll()
-                if return_code:
-                    raise SwiftError(proc.stderr.read(), return_code)
-                if return_code == 0:
-                    break
-            yield out
-
 
     def simple_cmd(self, cmd, cwd=None):
         'helper to execute a swift command in given cwd'
@@ -261,11 +365,25 @@ class SwiftResource(object):
 class SwiftFileResource(SwiftResource, AbstractFileResource):
 
     @property
+    def _read_stream(self):
+        if hasattr(self, "_write_stream_"):
+            raise IOError("can't read until write operation is flush")
+        if hasattr(self, "_append_stream_"):
+            raise IOError("can't read until append operation is flush")
+        if not hasattr(self, "_read_stream_"):
+            self._read_stream_ = self._location.open_file(self._container, self._local_path)
+        return self._read_stream_
+
+
+    def uncompress(self):
+        mod = guess_compression_module(self._local_path)
+        return mod.open(self._read_stream)
+
+    @property
     def size(self):
         if not self.exists:
             return 0
         return int(self._stat["Content Length"])
-
 
     def flush(self):
         raise NotImplementedError()
@@ -283,7 +401,8 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
         return True
 
     def read(self, size=-1):
-        raise NotImplementedError()
+        'read at most `size` bytes, returned as a string'
+        return self._read_stream.read(size)
 
     def write(self, string):
         raise NotImplementedError()
@@ -292,7 +411,7 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
         raise NotImplementedError()
 
     def __iter__(self):
-        return self._location.iter_file(self._container, self._local_path)
+        return iter(self._read_stream)
 
 
 class SwiftDirectoryResource(SwiftResource, AbstractDirectoryResource):

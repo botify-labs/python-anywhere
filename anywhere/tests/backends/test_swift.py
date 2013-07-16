@@ -21,6 +21,8 @@ DIR1_URL = '{}/{}/'.format(CONTAINER_URL, DIR1_NAME)
 FILE1_URL = '{}file1'.format(DIR1_URL)
 FILE2_URL = '{}file2'.format(DIR1_URL)
 PUTFILE_CONTENT = "put file content"
+GZIPED_FILE_CONTENT = "gziped content"
+GZIPED_FILE_URL = '{}hello.gz'.format(DIR1_URL)
 SWIFT_ENV = {
     'OS_USERNAME': os.environ['ANYWHERE_TEST_USERNAME'],
     'OS_TENANT_NAME': os.environ['ANYWHERE_TEST_TENANT_NAME'],
@@ -41,6 +43,9 @@ def init_swift_backend():
     os.makedirs(testdir)
     with open(os.path.join(testdir, 'file1'), 'w') as f:
         f.write(FILE1_CONTENT)
+    command = 'echo "{}" | gzip -c > {}'.format(GZIPED_FILE_CONTENT,
+                                                os.path.join(testdir, 'hello.gz'))
+    subprocess.Popen(command, shell=True)
     swift_command(['swift', 'delete', SWIFT_CONTAINER])
     swift_command(['swift', 'upload', SWIFT_CONTAINER, DIR1_NAME], cwd=tmpdir)
     return tmpdir
@@ -77,7 +82,7 @@ class TestSwiftDirectory(TestCase):
 
     def test_init(self):
         self.assertTrue(self.dir1.exists)
-        self.assertEqual(self.dir1.list(), ['file1'])
+        self.assertEqual(self.dir1.list(), ['file1', 'hello.gz'])
         self.assertIsInstance(self.container, SwiftDirectoryResource)
 
     def test_exists(self):
@@ -100,6 +105,13 @@ class TestSwiftFile(TestCase):
     def test_iter(self):
         file_list = [line for line in self.file1]
         self.assertEqual(file_list, [FILE1_LINE1, FILE1_LINE2])
+
+    def test_ungzip(self):
+        gz_file = Resource(GZIPED_FILE_URL)
+        self.assertEqual(gz_file.uncompress().read(), GZIPED_FILE_CONTENT+'\n')
+        gz_file = Resource(GZIPED_FILE_URL)
+        self.assertEqual(gz_file.uncompress().read(200), GZIPED_FILE_CONTENT+'\n')
+
 
     #def test_init(self):
         #"""test Resource init"""
