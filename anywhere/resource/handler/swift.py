@@ -162,7 +162,7 @@ class SwiftLocation(object):
                  password, temp_dir):
         self.name = name
         self.base_temp_dir = temp_dir or tempfile.gettempdir()
-        self.tmpdirs = []
+        self.tmpdirs = set()
         self.swift_env = {
             'OS_USERNAME': user_name,
             'OS_TENANT_NAME': tenant_name,
@@ -230,6 +230,7 @@ class SwiftLocation(object):
         the given `tmpdir`/`path`. If tmpdir is not provided, a new one
         is created. tmpdir path is returned along with the open file.'''
         tmpdir = tmpdir or tempfile.mkdtemp(dir=self.base_temp_dir)
+        self.tmpdirs.add(tmpdir)
         path = os.path.join(tmpdir, container, path)
         dirname, basename = os.path.split(path)
         if not os.path.exists(dirname):

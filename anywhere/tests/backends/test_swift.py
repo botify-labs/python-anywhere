@@ -81,12 +81,21 @@ class TestSwiftLocation(TestCase):
         self.assertIn(SWIFT_CONTAINER, containers)
 
     def test_close(self):
+        # create a tempdir
+        f, tmpdir = self.loc.get_temp_file('container', 'path/to/file', None, 'w')
+        f.close()
         # the location exists
-        self.assertEqual(self.loc.tmpdirs, [])
-        # let's close it
+        self.assertEqual(self.loc.tmpdirs, set([tmpdir]))
+        # its local cache is created
+        self.assertTrue(os.path.exists(tmpdir))
+        self.assertTrue(os.path.isdir(tmpdir))
+        # let's close our location
         unregister_location(SWIFT_LOCATION)
+        # it's not active any more
         with self.assertRaises(NotActive) as e:
             self.loc.tmpdirs
+        # its cache was deleted
+        self.assertFalse(os.path.exists(tmpdir))
 
 
 class TestSwiftDirectory(TestCase):
