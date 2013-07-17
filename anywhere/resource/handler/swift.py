@@ -115,9 +115,9 @@ class LocationRegistry(dict):
 location_registry = LocationRegistry()
 
 
-def register_location(name, user_name, tenant_name, auth_url, password):
+def register_location(name, user_name, tenant_name, auth_url, password, temp_dir=None):
     location_registry[name] = SwiftLocation(name, user_name, tenant_name, auth_url,
-                                            password)
+                                            password, temp_dir)
 
 
 
@@ -151,8 +151,10 @@ class SwiftLocation(object):
     a swift location abstraction. Holds the configuration for the
     location and is Responsible for all swift command invocation.
     """
-    def __init__(self, name, user_name, tenant_name, auth_url, password):
+    def __init__(self, name, user_name, tenant_name, auth_url,
+                 password, temp_dir):
         self.name = name
+        self.base_temp_dir = temp_dir or tempfile.gettempdir()
         self.swift_env = {
             'OS_USERNAME': user_name,
             'OS_TENANT_NAME': tenant_name,
@@ -205,10 +207,26 @@ class SwiftLocation(object):
         return subprocess.Popen(cmd, stderr=subprocess.PIPE, cwd=cwd,
                                 stdout=subprocess.PIPE, env=self.env)
 
+    def get_temp_file(self, container, path, tmpdir=None, mode='r'):
+        '''
+        get_temp_file(str, str, str, str) -> (file, str)
+
+        return an open file (according to `mode`). It's created at
+        the given `tmpdir`/`path`. If tmpdir is not provided, a new one
+        is created. tmpdir path is returned along with the open file.'''
+        tmpdir = tmpdir or tempfile.mkdtemp(dir=self.base_temp_dir)
+        path = os.path.join(tmpdir, container, path)
+        dirname, basename = os.path.split(path)
+        print dirname
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+        return (open(path, mode), tmpdir)
+
     def simple_cmd(self, cmd, cwd=None):
         'helper to execute a swift command in given cwd'
         if isinstance(cmd, basestring):
             cmd = cmd.split(' ')
+        print '{}$ {}'.format(cwd or '.', ' '.join(cmd))
         proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, cwd=cwd,
                                 stdout=subprocess.PIPE, env=self.env)
         retcode = proc.wait()
@@ -221,10 +239,14 @@ class SwiftLocation(object):
         cmd = [SWIFT_CMD, 'stat', container, path]
         return self.simple_cmd(cmd)
 
-    def push_object(self, container, path, changes=True):
+    def push_temp(self, container, path, tmpdir):
+        self.push_object(container, path,
+                        cwd=os.path.join(tmpdir, container), changes=False)
+
+    def push_object(self, container, path, cwd=None, changes=True):
         '''send an object to swift backend'''
         cmd = [SWIFT_CMD, 'upload', changes and '-c' or '', container, path]
-        self.simple_cmd(cmd)
+        self.simple_cmd(filter(None, cmd), cwd)
         return True
 
     def exists(self, container, path):
@@ -290,7 +312,7 @@ def Resource(path, location='', scheme='swift'):
 class SwiftResource(object):
     type = 'swift'
 
-    def __init__(self, path, location):
+    def __init__(self, path, location, _tmpdir=None):
         self._path = path
         self._location = location
         chunks = path.strip('/').split('/', 1)
@@ -303,6 +325,7 @@ class SwiftResource(object):
         else:
             self._local_path = chunks[1]
         self._stat_ = None
+        self._tmpdir = _tmpdir
 
     @property
     def _stat(self):
@@ -345,7 +368,7 @@ class SwiftResource(object):
         return datetime.now()
 
     def delete(self):
-        return self._location.delete_object(self._location, self._local_path)
+        return self._location.delete_object(self._container, self._local_path)
 
     def copy(self, dest, overwrite=False):
         'copy the resource to another resource'
@@ -374,6 +397,23 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
             self._read_stream_ = self._location.open_file(self._container, self._local_path)
         return self._read_stream_
 
+    @property
+    def _write_stream(self):
+        if hasattr(self, "_append_stream_"):
+            raise IOError("can't write until append operation is flush")
+        if not hasattr(self, "_write_stream_"):
+            self._write_stream_, self._tmpdir = self._location.get_temp_file(
+                self._container, self._local_path, self._tmpdir, 'w')
+        return self._write_stream_
+
+    @property
+    def _append_stream(self):
+        if hasattr(self, "_write_stream_"):
+            raise IOError("can't append until write operation is flush")
+        if not hasattr(self, "_append_stream_"):
+            self._append_stream_ = StringIO()
+            self._append_stream_.write(self.db_object)
+        return self._append_stream_
 
     def uncompress(self):
         mod = guess_compression_module(self._local_path)
@@ -386,13 +426,27 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
         return int(self._stat["Content Length"])
 
     def flush(self):
-        raise NotImplementedError()
+        for stream_name in ['_write_stream_', '_append_stream_']:
+            if hasattr(self, stream_name):
+                stream = getattr(self, stream_name)
+                stream.close()
+                self._location.push_temp(self._container, self._local_path, self._tmpdir)
+                delattr(self, stream_name)
 
     def reset(self):
-        raise NotImplementedError()
+        "abort not flushed writes"
+        for stream_name in ['_write_stream_', '_append_stream_']:
+            if hasattr(self, stream_name):
+                stream = getattr(self, stream_name)
+                stream.close()
+                delattr(self, stream_name)
 
     def empty(self, flush=True):
-        raise NotImplementedError()
+        'empty the file'
+        self.reset()
+        self.write('')
+        if flush:
+            self.flush()
 
     def create(self):
         if self.exists:
@@ -405,7 +459,7 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
         return self._read_stream.read(size)
 
     def write(self, string):
-        raise NotImplementedError()
+        return self._write_stream.write(string)
 
     def append(self, string):
         raise NotImplementedError()

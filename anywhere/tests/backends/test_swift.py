@@ -1,6 +1,7 @@
 import os
 import tempfile
 import subprocess
+import shutil
 
 from unittest import TestCase
 from anywhere.resource.handler import Resource
@@ -11,6 +12,8 @@ from anywhere.resource.handler.swift import SwiftDirectoryResource, SwiftFileRes
 FILE1_LINE1 = 'file 1 line 1 content\n'
 FILE1_LINE2 = 'file 1 line 2 content\n'
 FILE1_LINE3 = 'file 1 line 3 content'
+FILE2_LINE1 = 'file 2 line 1 content\n'
+FILE2_LINE2 = 'file 2 line 2 content\n'
 FILE1_CONTENT = FILE1_LINE1 + FILE1_LINE2
 SWIFT_LOCATION = 'testloc'
 SWIFT_CONTAINER = 'anywhere_test'
@@ -36,7 +39,8 @@ def init_swift_backend():
                       os.environ['ANYWHERE_TEST_USERNAME'],
                       os.environ['ANYWHERE_TEST_TENANT_NAME'],
                       os.environ['ANYWHERE_TEST_AUTH_URL'],
-                      os.environ['ANYWHERE_TEST_PASSWORD']
+                      os.environ['ANYWHERE_TEST_PASSWORD'],
+                      os.environ.get('ANYWHERE_TEST_TEMPDIR', None)
                       )
     tmpdir = tempfile.mkdtemp()
     testdir = os.path.join(tmpdir, DIR1_NAME)
@@ -54,6 +58,7 @@ def init_swift_backend():
 def swift_command(cmd, cwd=None):
     if isinstance(cmd, basestring):
         cmd = cmd.split(' ')
+    print '{}$ {}'.format(cwd or '.', ' '.join(cmd))
     env = os.environ.copy()
     env.update(SWIFT_ENV)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, cwd=cwd, env=env)
@@ -96,8 +101,11 @@ class TestSwiftDirectory(TestCase):
 
 class TestSwiftFile(TestCase):
     def setUp(self):
-        init_swift_backend()
+        self.tmpdir = init_swift_backend()
         self.file1 = Resource(FILE1_URL)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
 
     def test_url(self):
         self.assertEqual(self.file1.url, FILE1_URL)
@@ -112,6 +120,18 @@ class TestSwiftFile(TestCase):
         gz_file = Resource(GZIPED_FILE_URL)
         self.assertEqual(gz_file.uncompress().read(200), GZIPED_FILE_CONTENT+'\n')
 
+    def test_write(self):
+        file2 = Resource(FILE2_URL)
+        file2.write(FILE2_LINE1)
+        file2.write(FILE2_LINE2)
+        self.assertFalse(file2.exists)
+        file2.flush()
+        self.assertTrue(file2.exists)
+        cmd = ['swift', 'download', '-o', '-', SWIFT_CONTAINER, 'dir1/file2']
+        self.assertEqual(swift_command(cmd), ''.join([FILE2_LINE1, FILE2_LINE2]))
+        file2_copy = Resource(FILE2_URL)
+        file_list = [line for line in file2_copy]
+        self.assertEqual(file_list, [FILE2_LINE1, FILE2_LINE2])
 
     #def test_init(self):
         #"""test Resource init"""
