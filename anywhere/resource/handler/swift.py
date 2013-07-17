@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import datetime
 from cStringIO import StringIO
+import shutil
 
 try:
     from swiftclient import client as swift
@@ -120,6 +121,12 @@ def register_location(name, user_name, tenant_name, auth_url, password, temp_dir
                                             password, temp_dir)
 
 
+def unregister_location(name):
+    loc = location_registry.get(name, None)
+    if loc is None:
+        return
+    loc.close()
+    del location_registry[name]
 
 class SwiftFileBody(OHelper):
     def __init__(self, body):
@@ -155,6 +162,7 @@ class SwiftLocation(object):
                  password, temp_dir):
         self.name = name
         self.base_temp_dir = temp_dir or tempfile.gettempdir()
+        self.tmpdirs = []
         self.swift_env = {
             'OS_USERNAME': user_name,
             'OS_TENANT_NAME': tenant_name,
@@ -164,13 +172,20 @@ class SwiftLocation(object):
         self.conn_params = get_conn_params(auth_url=auth_url, user_name=user_name,
                                            tenant_name=tenant_name, password=password)
         self._dirs = {}
-        self._conn = None
 
     @property
     def conn(self):
-        if self._conn is None:
-            self._conn = get_conn(self.conn_params)
-        return self._conn
+        return get_conn(self.conn_params)
+
+    def close(self):
+        for dir_ in self.tmpdirs:
+            shutil.rmtree(dir_)
+        del self.base_temp_dir
+        del self.tmpdirs
+        del self.swift_env
+        del self.conn_params
+        del self._dirs
+        self.__class__ = ClosedSwiftLocation
 
     def iter_container(self, container=''):
         ''' iterate the names of objects in a container, or all containers
@@ -217,7 +232,6 @@ class SwiftLocation(object):
         tmpdir = tmpdir or tempfile.mkdtemp(dir=self.base_temp_dir)
         path = os.path.join(tmpdir, container, path)
         dirname, basename = os.path.split(path)
-        print dirname
         if not os.path.exists(dirname):
             os.makedirs(dirname)
         return (open(path, mode), tmpdir)
@@ -226,7 +240,6 @@ class SwiftLocation(object):
         'helper to execute a swift command in given cwd'
         if isinstance(cmd, basestring):
             cmd = cmd.split(' ')
-        print '{}$ {}'.format(cwd or '.', ' '.join(cmd))
         proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, cwd=cwd,
                                 stdout=subprocess.PIPE, env=self.env)
         retcode = proc.wait()
@@ -298,6 +311,21 @@ class SwiftLocation(object):
 
     def __repr__(self):
         return '<{} {}>'.format(self.__class__.__name__, self.name)
+
+
+class NotActive(Exception):
+    '''a Swift Location is no more active'''
+
+class ClosedSwiftLocation(SwiftLocation):
+    """
+    """
+    def __getattr__(self, name):
+        if name in ('name', '__class__'):
+            return super(ClosedSwiftLocation, self).__getattr__(name)
+        raise NotActive('SwiftLocation `{}` is no more active'.format(self.name))
+
+    def __setattr__(self, name, value):
+        raise NotActive('SwiftLocation `{}` is no more active'.format(self.name))
 
 
 def Resource(path, location='', scheme='swift'):
@@ -430,8 +458,18 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
             if hasattr(self, stream_name):
                 stream = getattr(self, stream_name)
                 stream.close()
-                self._location.push_temp(self._container, self._local_path, self._tmpdir)
+                self._location.push_temp(self._container,
+                                         self._local_path, self._tmpdir)
                 delattr(self, stream_name)
+
+    def close(self):
+        self.flush()
+        if self._tmpdir:
+            try:
+                os.remove(os.path.join(self._tmpdir, self._container,
+                                       self._local_path))
+            except OSError:
+                pass
 
     def reset(self):
         "abort not flushed writes"

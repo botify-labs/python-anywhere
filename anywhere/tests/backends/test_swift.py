@@ -7,6 +7,7 @@ from unittest import TestCase
 from anywhere.resource.handler import Resource
 from anywhere.resource.handler.swift import register_location, location_registry
 from anywhere.resource.handler.swift import SwiftDirectoryResource, SwiftFileResource
+from anywhere.resource.handler.swift import unregister_location, NotActive
 
 
 FILE1_LINE1 = 'file 1 line 1 content\n'
@@ -58,7 +59,6 @@ def init_swift_backend():
 def swift_command(cmd, cwd=None):
     if isinstance(cmd, basestring):
         cmd = cmd.split(' ')
-    print '{}$ {}'.format(cwd or '.', ' '.join(cmd))
     env = os.environ.copy()
     env.update(SWIFT_ENV)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, cwd=cwd, env=env)
@@ -69,18 +69,35 @@ def swift_command(cmd, cwd=None):
 class TestSwiftLocation(TestCase):
     def setUp(self):
         self.tmpdir = init_swift_backend()
+        self.loc = location_registry[SWIFT_LOCATION]
+
+    def tearDown(self):
+        unregister_location(SWIFT_LOCATION)
+        shutil.rmtree(self.tmpdir)
 
     def test_iter_container(self):
-        it = location_registry[SWIFT_LOCATION].iter_container()
+        it = self.loc.iter_container()
         containers = list(it)
         self.assertIn(SWIFT_CONTAINER, containers)
+
+    def test_close(self):
+        # the location exists
+        self.assertEqual(self.loc.tmpdirs, [])
+        # let's close it
+        unregister_location(SWIFT_LOCATION)
+        with self.assertRaises(NotActive) as e:
+            self.loc.tmpdirs
 
 
 class TestSwiftDirectory(TestCase):
     def setUp(self):
-        init_swift_backend()
+        self.tmpdir = init_swift_backend()
         self.dir1 = Resource(DIR1_URL)
         self.container = Resource(CONTAINER_URL)
+
+    def tearDown(self):
+        unregister_location(SWIFT_LOCATION)
+        shutil.rmtree(self.tmpdir)
 
     def test_url(self):
         self.assertEqual(self.dir1.url, DIR1_URL)
@@ -105,6 +122,7 @@ class TestSwiftFile(TestCase):
         self.file1 = Resource(FILE1_URL)
 
     def tearDown(self):
+        unregister_location(SWIFT_LOCATION)
         shutil.rmtree(self.tmpdir)
 
     def test_url(self):
@@ -132,6 +150,19 @@ class TestSwiftFile(TestCase):
         file2_copy = Resource(FILE2_URL)
         file_list = [line for line in file2_copy]
         self.assertEqual(file_list, [FILE2_LINE1, FILE2_LINE2])
+
+    def test_close(self):
+        self.file1.write('test')
+        self.file1.flush()
+        tmp_file_path = os.path.join(self.file1._tmpdir,
+                                     self.file1._container,
+                                     self.file1._local_path)
+        # the local cache exists
+        with open(tmp_file_path) as f:
+            self.assertEquals(f.read(), 'test')
+        # free all resources
+        self.file1.close()
+        self.assertFalse(os.path.exists(tmp_file_path))
 
     #def test_init(self):
         #"""test Resource init"""
