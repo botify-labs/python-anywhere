@@ -172,14 +172,26 @@ class SwiftLocation(object):
         self.conn_params = get_conn_params(auth_url=auth_url, user_name=user_name,
                                            tenant_name=tenant_name, password=password)
         self._dirs = {}
+        self.resource_nb = 0
+
+    def inc_resource(self):
+        self.resource_nb += 1
+
+    def dec_resource(self):
+        self.resource_nb -= 1
+        if not self.resource_nb:
+            self.reset_cache()
 
     @property
     def conn(self):
         return get_conn(self.conn_params)
 
-    def close(self):
+    def reset_cache(self):
         for dir_ in self.tmpdirs:
             shutil.rmtree(dir_)
+
+    def close(self):
+        self.reset_cache()
         del self.base_temp_dir
         del self.tmpdirs
         del self.swift_env
@@ -415,7 +427,6 @@ class SwiftResource(object):
 
 
 class SwiftFileResource(SwiftResource, AbstractFileResource):
-
     @property
     def _read_stream(self):
         if hasattr(self, "_write_stream_"):
@@ -433,6 +444,7 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
         if not hasattr(self, "_write_stream_"):
             self._write_stream_, self._tmpdir = self._location.get_temp_file(
                 self._container, self._local_path, self._tmpdir, 'w')
+            self._location.inc_resource()
         return self._write_stream_
 
     @property
@@ -462,6 +474,7 @@ class SwiftFileResource(SwiftResource, AbstractFileResource):
                 self._location.push_temp(self._container,
                                          self._local_path, self._tmpdir)
                 delattr(self, stream_name)
+                self._location.dec_resource()
 
     def close(self):
         self.flush()
